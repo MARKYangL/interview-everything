@@ -4,6 +4,12 @@ import { ipcMain, shell, dialog } from "electron"
 import { randomBytes } from "crypto"
 import { IIpcHandlerDeps } from "./main"
 import { configHelper } from "./ConfigHelper"
+import { RealtimeTranscriptionManager } from './services/RealtimeTranscriptionManager';
+import { SystemAudioCapture } from './services/SystemAudioCapture';
+
+// 声明语音识别相关变量
+let transcriptionManager: RealtimeTranscriptionManager | null = null;
+let audioCapture: SystemAudioCapture | null = null;
 
 export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
   console.log("Initializing IPC handlers")
@@ -348,4 +354,94 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       return { success: false, error: "Failed to delete last screenshot" }
     }
   })
+
+  // 处理语音识别启动
+  ipcMain.handle('start-voice-recognition', async (event, { provider = 'openai' }) => {
+    try {
+      const config = configHelper.loadConfig();
+      const apiKey = config.apiKey;
+      
+      if (!apiKey) {
+        return { success: false, error: 'No API key provided' };
+      }
+      
+      // 关闭之前的实例
+      if (transcriptionManager) {
+        transcriptionManager.close();
+        transcriptionManager = null;
+      }
+      
+      if (audioCapture) {
+        audioCapture.stopCapturing();
+        audioCapture = null;
+      }
+      
+      // 初始化转录管理器
+      transcriptionManager = new RealtimeTranscriptionManager(apiKey, provider);
+      
+      // 创建转录会话
+      const sessionCreated = await transcriptionManager.createTranscriptionSession();
+      if (!sessionCreated) {
+        return { success: false, error: 'Failed to create transcription session' };
+      }
+      
+      // 连接WebSocket
+      const connected = transcriptionManager.connectToWebSocket();
+      if (!connected) {
+        return { success: false, error: 'Failed to connect to WebSocket' };
+      }
+      
+      // 初始化音频捕获
+      audioCapture = new SystemAudioCapture(transcriptionManager);
+      await audioCapture.initialize();
+      
+      // 设置事件监听
+      transcriptionManager.on('transcription-delta', (data: any) => {
+        event.sender.send('voice-transcript-update', data.text);
+      });
+      
+      transcriptionManager.on('transcription-completed', (data: any) => {
+        event.sender.send('voice-transcript-update', data.text);
+      });
+      
+      transcriptionManager.on('speech-started', () => {
+        event.sender.send('voice-speaking-state', true);
+      });
+      
+      transcriptionManager.on('speech-stopped', () => {
+        event.sender.send('voice-speaking-state', false);
+      });
+      
+      // 开始捕获音频
+      const captureStarted = await audioCapture.startCapturing();
+      if (!captureStarted) {
+        return { success: false, error: 'Failed to start audio capture' };
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error starting voice recognition:', error);
+      return { success: false, error: 'Error starting voice recognition' };
+    }
+  });
+  
+  // 处理语音识别停止
+  ipcMain.handle('stop-voice-recognition', async () => {
+    try {
+      if (audioCapture) {
+        audioCapture.stopCapturing();
+        audioCapture = null;
+      }
+      
+      if (transcriptionManager) {
+        transcriptionManager.close();
+        transcriptionManager = null;
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error stopping voice recognition:', error);
+      return { success: false, error: 'Error stopping voice recognition' };
+    }
+  });
 }

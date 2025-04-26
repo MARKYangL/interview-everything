@@ -7,7 +7,8 @@ import { OpenAI } from "openai"
 
 interface Config {
   apiKey: string;
-  apiProvider: "openai" | "gemini" | "anthropic";  // Added provider selection
+  apiProvider: "openai" | "gemini" | "anthropic" | "deepseek";  // 添加deepseek作为提供商
+  voiceProvider?: "browser" | "openai" | "deepseek";  // 添加语音识别提供商设置
   extractionModel: string;
   solutionModel: string;
   debuggingModel: string;
@@ -20,6 +21,7 @@ export class ConfigHelper extends EventEmitter {
   private defaultConfig: Config = {
     apiKey: "",
     apiProvider: "gemini", // Default to Gemini
+    voiceProvider: "browser", // 默认使用浏览器的语音识别
     extractionModel: "gemini-2.0-flash", // Default to Flash for faster responses
     solutionModel: "gemini-2.0-flash",
     debuggingModel: "gemini-2.0-flash",
@@ -58,7 +60,7 @@ export class ConfigHelper extends EventEmitter {
   /**
    * Validate and sanitize model selection to ensure only allowed models are used
    */
-  private sanitizeModelSelection(model: string, provider: "openai" | "gemini" | "anthropic"): string {
+  private sanitizeModelSelection(model: string, provider: "openai" | "gemini" | "anthropic" | "deepseek"): string {
     if (provider === "openai") {
       // Only allow gpt-4o and gpt-4o-mini for OpenAI
       const allowedModels = ['gpt-4o', 'gpt-4o-mini'];
@@ -83,6 +85,14 @@ export class ConfigHelper extends EventEmitter {
         return 'claude-3-7-sonnet-20250219';
       }
       return model;
+    } else if (provider === "deepseek") {
+      // 允许的DeepSeek模型
+      const allowedModels = ['deepseek-chat', 'deepseek-coder'];
+      if (!allowedModels.includes(model)) {
+        console.warn(`Invalid DeepSeek model specified: ${model}. Using default model: deepseek-chat`);
+        return 'deepseek-chat';
+      }
+      return model;
     }
     // Default fallback
     return model;
@@ -95,8 +105,15 @@ export class ConfigHelper extends EventEmitter {
         const config = JSON.parse(configData);
         
         // Ensure apiProvider is a valid value
-        if (config.apiProvider !== "openai" && config.apiProvider !== "gemini"  && config.apiProvider !== "anthropic") {
+        if (config.apiProvider !== "openai" && config.apiProvider !== "gemini" && 
+            config.apiProvider !== "anthropic" && config.apiProvider !== "deepseek") {
           config.apiProvider = "gemini"; // Default to Gemini if invalid
+        }
+        
+        // 确保voiceProvider是有效值
+        if (config.voiceProvider !== "browser" && config.voiceProvider !== "openai" && 
+            config.voiceProvider !== "deepseek") {
+          config.voiceProvider = "browser"; // 默认使用浏览器
         }
         
         // Sanitize model selections to ensure only allowed models are used
@@ -154,11 +171,16 @@ export class ConfigHelper extends EventEmitter {
       if (updates.apiKey && !updates.apiProvider) {
         // If API key starts with "sk-", it's likely an OpenAI key
         if (updates.apiKey.trim().startsWith('sk-')) {
-          provider = "openai";
-          console.log("Auto-detected OpenAI API key format");
-        } else if (updates.apiKey.trim().startsWith('sk-ant-')) {
-          provider = "anthropic";
-          console.log("Auto-detected Anthropic API key format");
+          if (updates.apiKey.trim().startsWith('sk-ant-')) {
+            provider = "anthropic";
+            console.log("Auto-detected Anthropic API key format");
+          } else if (updates.apiKey.trim().startsWith('sk-ds-')) {
+            provider = "deepseek";
+            console.log("Auto-detected DeepSeek API key format");
+          } else {
+            provider = "openai";
+            console.log("Auto-detected OpenAI API key format");
+          }
         } else {
           provider = "gemini";
           console.log("Using Gemini API key format (default)");
@@ -174,14 +196,34 @@ export class ConfigHelper extends EventEmitter {
           updates.extractionModel = "gpt-4o";
           updates.solutionModel = "gpt-4o";
           updates.debuggingModel = "gpt-4o";
+          // 如果API提供商是OpenAI，默认使用OpenAI的语音服务
+          if (!updates.voiceProvider) {
+            updates.voiceProvider = "openai";
+          }
         } else if (updates.apiProvider === "anthropic") {
           updates.extractionModel = "claude-3-7-sonnet-20250219";
           updates.solutionModel = "claude-3-7-sonnet-20250219";
           updates.debuggingModel = "claude-3-7-sonnet-20250219";
+          // Anthropic没有语音服务，使用浏览器
+          if (!updates.voiceProvider) {
+            updates.voiceProvider = "browser";
+          }
+        } else if (updates.apiProvider === "deepseek") {
+          updates.extractionModel = "deepseek-chat";
+          updates.solutionModel = "deepseek-chat";
+          updates.debuggingModel = "deepseek-chat";
+          // 如果API提供商是DeepSeek，默认使用DeepSeek的语音服务
+          if (!updates.voiceProvider) {
+            updates.voiceProvider = "deepseek";
+          }
         } else {
           updates.extractionModel = "gemini-2.0-flash";
           updates.solutionModel = "gemini-2.0-flash";
           updates.debuggingModel = "gemini-2.0-flash";
+          // Gemini目前没有语音服务，使用浏览器
+          if (!updates.voiceProvider) {
+            updates.voiceProvider = "browser";
+          }
         }
       }
       
@@ -202,8 +244,9 @@ export class ConfigHelper extends EventEmitter {
       // Only emit update event for changes other than opacity
       // This prevents re-initializing the AI client when only opacity changes
       if (updates.apiKey !== undefined || updates.apiProvider !== undefined || 
-          updates.extractionModel !== undefined || updates.solutionModel !== undefined || 
-          updates.debuggingModel !== undefined || updates.language !== undefined) {
+          updates.voiceProvider !== undefined || updates.extractionModel !== undefined || 
+          updates.solutionModel !== undefined || updates.debuggingModel !== undefined || 
+          updates.language !== undefined) {
         this.emit('config-updated', newConfig);
       }
       
@@ -225,12 +268,14 @@ export class ConfigHelper extends EventEmitter {
   /**
    * Validate the API key format
    */
-  public isValidApiKeyFormat(apiKey: string, provider?: "openai" | "gemini" | "anthropic" ): boolean {
+  public isValidApiKeyFormat(apiKey: string, provider?: "openai" | "gemini" | "anthropic" | "deepseek" ): boolean {
     // If provider is not specified, attempt to auto-detect
     if (!provider) {
       if (apiKey.trim().startsWith('sk-')) {
         if (apiKey.trim().startsWith('sk-ant-')) {
           provider = "anthropic";
+        } else if (apiKey.trim().startsWith('sk-ds-')) {
+          provider = "deepseek";
         } else {
           provider = "openai";
         }
@@ -248,6 +293,9 @@ export class ConfigHelper extends EventEmitter {
     } else if (provider === "anthropic") {
       // Basic format validation for Anthropic API keys
       return /^sk-ant-[a-zA-Z0-9]{32,}$/.test(apiKey.trim());
+    } else if (provider === "deepseek") {
+      // DeepSeek API密钥格式验证
+      return /^sk-ds-[a-zA-Z0-9]{32,}$/.test(apiKey.trim());
     }
     
     return false;
@@ -288,13 +336,16 @@ export class ConfigHelper extends EventEmitter {
   /**
    * Test API key with the selected provider
    */
-  public async testApiKey(apiKey: string, provider?: "openai" | "gemini" | "anthropic"): Promise<{valid: boolean, error?: string}> {
+  public async testApiKey(apiKey: string, provider?: "openai" | "gemini" | "anthropic" | "deepseek"): Promise<{valid: boolean, error?: string}> {
     // Auto-detect provider based on key format if not specified
     if (!provider) {
       if (apiKey.trim().startsWith('sk-')) {
         if (apiKey.trim().startsWith('sk-ant-')) {
           provider = "anthropic";
           console.log("Auto-detected Anthropic API key format for testing");
+        } else if (apiKey.trim().startsWith('sk-ds-')) {
+          provider = "deepseek";
+          console.log("Auto-detected DeepSeek API key format for testing");
         } else {
           provider = "openai";
           console.log("Auto-detected OpenAI API key format for testing");
@@ -311,6 +362,8 @@ export class ConfigHelper extends EventEmitter {
       return this.testGeminiKey(apiKey);
     } else if (provider === "anthropic") {
       return this.testAnthropicKey(apiKey);
+    } else if (provider === "deepseek") {
+      return this.testDeepSeekKey(apiKey);
     }
     
     return { valid: false, error: "Unknown API provider" };
@@ -386,6 +439,31 @@ export class ConfigHelper extends EventEmitter {
     } catch (error: any) {
       console.error('Anthropic API key test failed:', error);
       let errorMessage = 'Unknown error validating Anthropic API key';
+      
+      if (error.message) {
+        errorMessage = `Error: ${error.message}`;
+      }
+      
+      return { valid: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Test DeepSeek API key
+   * Note: This is a simplified implementation since we don't have the actual DeepSeek client
+   */
+  private async testDeepSeekKey(apiKey: string): Promise<{valid: boolean, error?: string}> {
+    try {
+      // For now, we'll just do a basic check to ensure the key exists and has valid format
+      // In production, you would connect to the DeepSeek API and validate the key
+      if (apiKey && /^sk-ds-[a-zA-Z0-9]{32,}$/.test(apiKey.trim())) {
+        // Here you would actually validate the key with a DeepSeek API call
+        return { valid: true };
+      }
+      return { valid: false, error: 'Invalid DeepSeek API key format.' };
+    } catch (error: any) {
+      console.error('DeepSeek API key test failed:', error);
+      let errorMessage = 'Unknown error validating DeepSeek API key';
       
       if (error.message) {
         errorMessage = `Error: ${error.message}`;

@@ -13,7 +13,9 @@ import { Button } from "../ui/button";
 import { Settings } from "lucide-react";
 import { useToast } from "../../contexts/toast";
 
-type APIProvider = "openai" | "gemini" | "anthropic";
+type APIProvider = "openai" | "gemini" | "anthropic" | "deepseek";
+
+type VoiceProvider = "browser" | "openai" | "deepseek";
 
 type AIModel = {
   id: string;
@@ -28,6 +30,7 @@ type ModelCategory = {
   openaiModels: AIModel[];
   geminiModels: AIModel[];
   anthropicModels: AIModel[];
+  deepseekModels: AIModel[];
 };
 
 // Define available models for each category
@@ -76,6 +79,18 @@ const modelCategories: ModelCategory[] = [
         name: "Claude 3 Opus",
         description: "Top-level intelligence, fluency, and understanding"
       }
+    ],
+    deepseekModels: [
+      {
+        id: "deepseek-chat",
+        name: "DeepSeek Chat",
+        description: "Best overall performance for problem extraction"
+      },
+      {
+        id: "deepseek-coder",
+        name: "DeepSeek Coder",
+        description: "Specialized for code-related tasks"
+      }
     ]
   },
   {
@@ -121,6 +136,18 @@ const modelCategories: ModelCategory[] = [
         id: "claude-3-opus-20240229",
         name: "Claude 3 Opus",
         description: "Top-level intelligence, fluency, and understanding"
+      }
+    ],
+    deepseekModels: [
+      {
+        id: "deepseek-chat",
+        name: "DeepSeek Chat",
+        description: "Strong general problem-solving capability"
+      },
+      {
+        id: "deepseek-coder",
+        name: "DeepSeek Coder",
+        description: "Specialized for coding solutions"
       }
     ]
   },
@@ -168,6 +195,18 @@ const modelCategories: ModelCategory[] = [
         name: "Claude 3 Opus",
         description: "Top-level intelligence, fluency, and understanding"
       }
+    ],
+    deepseekModels: [
+      {
+        id: "deepseek-chat",
+        name: "DeepSeek Chat",
+        description: "Strong for debugging general issues"
+      },
+      {
+        id: "deepseek-coder",
+        name: "DeepSeek Coder",
+        description: "Specialized for identifying code bugs and errors"
+      }
     ]
   }
 ];
@@ -181,6 +220,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
   const [open, setOpen] = useState(externalOpen || false);
   const [apiKey, setApiKey] = useState("");
   const [apiProvider, setApiProvider] = useState<APIProvider>("openai");
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>("browser");
   const [extractionModel, setExtractionModel] = useState("gpt-4o");
   const [solutionModel, setSolutionModel] = useState("gpt-4o");
   const [debuggingModel, setDebuggingModel] = useState("gpt-4o");
@@ -210,6 +250,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
       interface Config {
         apiKey?: string;
         apiProvider?: APIProvider;
+        voiceProvider?: VoiceProvider;
         extractionModel?: string;
         solutionModel?: string;
         debuggingModel?: string;
@@ -220,6 +261,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
         .then((config: Config) => {
           setApiKey(config.apiKey || "");
           setApiProvider(config.apiProvider || "openai");
+          setVoiceProvider(config.voiceProvider || "browser");
           setExtractionModel(config.extractionModel || "gpt-4o");
           setSolutionModel(config.solutionModel || "gpt-4o");
           setDebuggingModel(config.debuggingModel || "gpt-4o");
@@ -243,15 +285,32 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
       setExtractionModel("gpt-4o");
       setSolutionModel("gpt-4o");
       setDebuggingModel("gpt-4o");
+      // 如果切换到OpenAI，自动设置语音提供商为OpenAI
+      setVoiceProvider("openai");
     } else if (provider === "gemini") {
-      setExtractionModel("gemini-1.5-pro");
-      setSolutionModel("gemini-1.5-pro");
-      setDebuggingModel("gemini-1.5-pro");
+      setExtractionModel("gemini-2.0-flash");
+      setSolutionModel("gemini-2.0-flash");
+      setDebuggingModel("gemini-2.0-flash");
+      // Gemini没有语音服务，使用浏览器
+      setVoiceProvider("browser");
     } else if (provider === "anthropic") {
       setExtractionModel("claude-3-7-sonnet-20250219");
       setSolutionModel("claude-3-7-sonnet-20250219");
       setDebuggingModel("claude-3-7-sonnet-20250219");
+      // Anthropic没有语音服务，使用浏览器
+      setVoiceProvider("browser");
+    } else if (provider === "deepseek") {
+      setExtractionModel("deepseek-coder");
+      setSolutionModel("deepseek-coder");
+      setDebuggingModel("deepseek-coder");
+      // 如果切换到DeepSeek，自动设置语音提供商为DeepSeek
+      setVoiceProvider("deepseek");
     }
+  };
+
+  // Handle voice provider change
+  const handleVoiceProviderChange = (provider: VoiceProvider) => {
+    setVoiceProvider(provider);
   };
 
   const handleSave = async () => {
@@ -260,6 +319,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
       const result = await window.electronAPI.updateConfig({
         apiKey,
         apiProvider,
+        voiceProvider,
         extractionModel,
         solutionModel,
         debuggingModel,
@@ -362,7 +422,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                   />
                   <div className="flex flex-col">
                     <p className="font-medium text-white text-sm">Gemini</p>
-                    <p className="text-xs text-white/60">Gemini 1.5 models</p>
+                    <p className="text-xs text-white/60">Gemini 2.0 models</p>
                   </div>
                 </div>
               </div>
@@ -386,6 +446,26 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                   </div>
                 </div>
               </div>
+              <div
+                className={`flex-1 p-2 rounded-lg cursor-pointer transition-colors ${
+                  apiProvider === "deepseek"
+                    ? "bg-white/10 border border-white/20"
+                    : "bg-black/30 border border-white/5 hover:bg-white/5"
+                }`}
+                onClick={() => handleProviderChange("deepseek")}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
+                      apiProvider === "deepseek" ? "bg-white" : "bg-white/20"
+                    }`}
+                  />
+                  <div className="flex flex-col">
+                    <p className="font-medium text-white text-sm">DeepSeek</p>
+                    <p className="text-xs text-white/60">DeepSeek models</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           
@@ -393,7 +473,8 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
             <label className="text-sm font-medium text-white" htmlFor="apiKey">
             {apiProvider === "openai" ? "OpenAI API Key" : 
              apiProvider === "gemini" ? "Gemini API Key" : 
-             "Anthropic API Key"}
+             apiProvider === "anthropic" ? "Anthropic API Key" :
+             "DeepSeek API Key"}
             </label>
             <Input
               id="apiKey"
@@ -403,7 +484,8 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
               placeholder={
                 apiProvider === "openai" ? "sk-..." : 
                 apiProvider === "gemini" ? "Enter your Gemini API key" :
-                "sk-ant-..."
+                apiProvider === "anthropic" ? "sk-ant-..." :
+                "Enter your DeepSeek API key"
               }
               className="bg-black/50 border-white/10 text-white"
             />
@@ -413,7 +495,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
               </p>
             )}
             <p className="text-xs text-white/50">
-              Your API key is stored locally and never sent to any server except {apiProvider === "openai" ? "OpenAI" : "Google"}
+              Your API key is stored locally and never sent to any server except {apiProvider === "openai" ? "OpenAI" : apiProvider === "gemini" ? "Google" : apiProvider === "anthropic" ? "Google" : "DeepSeek"}
             </p>
             <div className="mt-2 p-2 rounded-md bg-white/5 border border-white/10">
               <p className="text-xs text-white/80 mb-1">Don't have an API key?</p>
@@ -441,7 +523,7 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                   </p>
                   <p className="text-xs text-white/60">3. Create a new API key and paste it here</p>
                 </>
-              ) : (
+              ) : apiProvider === "anthropic" ? (
                 <>
                   <p className="text-xs text-white/60 mb-1">1. Create an account at <button 
                     onClick={() => openExternalLink('https://console.anthropic.com/signup')} 
@@ -449,6 +531,18 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                   </p>
                   <p className="text-xs text-white/60 mb-1">2. Go to the <button 
                     onClick={() => openExternalLink('https://console.anthropic.com/settings/keys')} 
+                    className="text-blue-400 hover:underline cursor-pointer">API Keys</button> section
+                  </p>
+                  <p className="text-xs text-white/60">3. Create a new API key and paste it here</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-white/60 mb-1">1. Create an account at <button 
+                    onClick={() => openExternalLink('https://deepseek.com/signup')} 
+                    className="text-blue-400 hover:underline cursor-pointer">DeepSeek</button>
+                  </p>
+                  <p className="text-xs text-white/60 mb-1">2. Go to the <button 
+                    onClick={() => openExternalLink('https://deepseek.com/settings/keys')} 
                     className="text-blue-400 hover:underline cursor-pointer">API Keys</button> section
                   </p>
                   <p className="text-xs text-white/60">3. Create a new API key and paste it here</p>
@@ -511,7 +605,8 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
               const models = 
                 apiProvider === "openai" ? category.openaiModels : 
                 apiProvider === "gemini" ? category.geminiModels :
-                category.anthropicModels;
+                apiProvider === "anthropic" ? category.anthropicModels :
+                category.deepseekModels;
               
               return (
                 <div key={category.key} className="mb-4">
@@ -526,13 +621,15 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                       const currentValue = 
                         category.key === 'extractionModel' ? extractionModel :
                         category.key === 'solutionModel' ? solutionModel :
-                        debuggingModel;
+                        category.key === 'debuggingModel' ? debuggingModel :
+                        "";
                       
                       // Determine which setter function to use
                       const setValue = 
                         category.key === 'extractionModel' ? setExtractionModel :
                         category.key === 'solutionModel' ? setSolutionModel :
-                        setDebuggingModel;
+                        category.key === 'debuggingModel' ? setDebuggingModel :
+                        () => {};
                         
                       return (
                         <div
@@ -562,6 +659,95 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                 </div>
               );
             })}
+          </div>
+          
+          <div className="space-y-2 mt-4">
+            <label className="text-sm font-medium text-white mb-2 block">Voice Recognition Provider</label>
+            <div className="grid grid-cols-3 gap-2">
+              <div
+                className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                  voiceProvider === "browser"
+                    ? "bg-white/10 border border-white/20"
+                    : "bg-black/30 border border-white/5 hover:bg-white/5"
+                }`}
+                onClick={() => handleVoiceProviderChange("browser")}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
+                      voiceProvider === "browser" ? "bg-white" : "bg-white/20"
+                    }`}
+                  />
+                  <div className="flex flex-col">
+                    <p className="font-medium text-white text-sm">Browser</p>
+                    <p className="text-xs text-white/60">Web Speech API</p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* 仅当API提供商为OpenAI时显示OpenAI语音选项 */}
+              <div
+                className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                  !["openai"].includes(apiProvider)
+                    ? "opacity-30 cursor-not-allowed"
+                    : voiceProvider === "openai"
+                    ? "bg-white/10 border border-white/20"
+                    : "bg-black/30 border border-white/5 hover:bg-white/5"
+                }`}
+                onClick={() => {
+                  if (["openai"].includes(apiProvider)) {
+                    handleVoiceProviderChange("openai");
+                  }
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
+                      voiceProvider === "openai" ? "bg-white" : "bg-white/20"
+                    }`}
+                  />
+                  <div className="flex flex-col">
+                    <p className="font-medium text-white text-sm">OpenAI</p>
+                    <p className="text-xs text-white/60">Whisper API</p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* 仅当API提供商为DeepSeek时显示DeepSeek语音选项 */}
+              <div
+                className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                  !["deepseek"].includes(apiProvider)
+                    ? "opacity-30 cursor-not-allowed"
+                    : voiceProvider === "deepseek"
+                    ? "bg-white/10 border border-white/20"
+                    : "bg-black/30 border border-white/5 hover:bg-white/5"
+                }`}
+                onClick={() => {
+                  if (["deepseek"].includes(apiProvider)) {
+                    handleVoiceProviderChange("deepseek");
+                  }
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
+                      voiceProvider === "deepseek" ? "bg-white" : "bg-white/20"
+                    }`}
+                  />
+                  <div className="flex flex-col">
+                    <p className="font-medium text-white text-sm">DeepSeek</p>
+                    <p className="text-xs text-white/60">Speech API</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-white/60 mt-1">
+              {voiceProvider === "browser" 
+                ? "Uses your browser's built-in Web Speech API. Works offline but may have limited accuracy." 
+                : voiceProvider === "openai" 
+                ? "Uses OpenAI's Whisper API for better transcription accuracy. Requires internet connection."
+                : "Uses DeepSeek's Speech API for better transcription accuracy. Requires internet connection."}
+            </p>
           </div>
         </div>
         <DialogFooter className="flex justify-between sm:justify-between">

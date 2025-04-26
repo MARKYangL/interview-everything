@@ -1,9 +1,17 @@
 import React, { useState, useEffect, useRef } from "react"
 import { createRoot } from "react-dom/client"
+import { useSelector, useDispatch } from "react-redux"
+import { 
+  startVoiceRecognition, 
+  stopVoiceRecognition,
+  setSpeakingState,
+  setTranscript
+} from "../../store/voiceRecognitionSlice"
 
 import { useToast } from "../../contexts/toast"
 import { LanguageSelector } from "../shared/LanguageSelector"
 import { COMMAND_KEY } from "../../utils/platform"
+import speechRecognitionService from "../../services/speechRecognition"
 
 interface QueueCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
@@ -23,6 +31,98 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
+  const dispatch = useDispatch()
+  
+  // 获取语音识别状态
+  const { isActive: isVoiceActive, transcript, isSpeaking } = useSelector(
+    (state: any) => state.voiceRecognition
+  )
+
+  // 切换语音识别状态
+  const toggleVoiceRecognition = () => {
+    if (isVoiceActive) {
+      dispatch(stopVoiceRecognition())
+      speechRecognitionService.stop()
+    } else {
+      // 获取当前语音提供商配置
+      window.electronAPI.getConfig().then((config: { voiceProvider?: string }) => {
+        const voiceProvider = config?.voiceProvider || 'browser';
+        
+        dispatch(startVoiceRecognition())
+        
+        if (voiceProvider === 'browser') {
+          // 使用浏览器内置的Web Speech API
+          // 设置语音识别选项
+          speechRecognitionService.setup({
+            continuous: true,
+            interimResults: true,
+            onResult: (text, isFinal) => {
+              dispatch(setTranscript(text))
+            },
+            onSpeechStart: () => {
+              dispatch(setSpeakingState(true))
+            },
+            onSpeechEnd: () => {
+              dispatch(setSpeakingState(false))
+            },
+            onError: (error) => {
+              console.error("Speech recognition error:", error)
+              showToast("Error", "Speech recognition error", "error")
+            }
+          })
+          
+          // 启动语音识别
+          speechRecognitionService.start()
+        } else {
+          // 对于OpenAI或DeepSeek，使用后端的服务
+          // 发送IPC消息给Electron主进程启动后端语音识别
+          window.electron.ipcRenderer.send('start-voice-recognition', { provider: voiceProvider });
+          
+          // 注册回调来接收语音转录结果
+          const handleTranscriptUpdate = (_: any, text: string) => {
+            dispatch(setTranscript(text));
+          };
+          
+          const handleSpeechStateUpdate = (_: any, isSpeaking: boolean) => {
+            dispatch(setSpeakingState(isSpeaking));
+          };
+          
+          window.electron.ipcRenderer.on('voice-transcript-update', handleTranscriptUpdate);
+          window.electron.ipcRenderer.on('voice-speaking-state', handleSpeechStateUpdate);
+          
+          // 清理函数可以放在组件卸载时调用
+        }
+      }).catch((error: Error) => {
+        console.error("Failed to get voice provider config:", error);
+        // 失败时默认使用浏览器API
+        dispatch(startVoiceRecognition());
+        setupBrowserSpeechRecognition();
+      });
+    }
+  }
+  
+  // 设置浏览器语音识别的辅助函数
+  const setupBrowserSpeechRecognition = () => {
+    speechRecognitionService.setup({
+      continuous: true,
+      interimResults: true,
+      onResult: (text, isFinal) => {
+        dispatch(setTranscript(text))
+      },
+      onSpeechStart: () => {
+        dispatch(setSpeakingState(true))
+      },
+      onSpeechEnd: () => {
+        dispatch(setSpeakingState(false))
+      },
+      onError: (error) => {
+        console.error("Speech recognition error:", error)
+        showToast("Error", "Speech recognition error", "error")
+      }
+    });
+    
+    speechRecognitionService.start();
+  }
 
   // Extract the repeated language selection logic into a separate function
   const extractLanguagesAndUpdate = (direction?: 'next' | 'prev') => {
@@ -117,6 +217,28 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     <div>
       <div className="pt-2 w-fit">
         <div className="text-xs text-white/90 backdrop-blur-md bg-black/60 rounded-lg py-2 px-4 flex items-center justify-center gap-4">
+          {/* Voice Recognition */}
+          <div
+            className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors"
+            onClick={toggleVoiceRecognition}
+          >
+            <span className="text-[11px] leading-none truncate">
+              {isVoiceActive 
+                ? isSpeaking 
+                  ? "Listening..." 
+                  : "Stop Listening" 
+                : "Start Voice Recognition"}
+            </span>
+            <div className="flex gap-1">
+              <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
+                {COMMAND_KEY}
+              </button>
+              <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
+                V
+              </button>
+            </div>
+          </div>
+
           {/* Screenshot */}
           <div
             className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors"
@@ -376,6 +498,39 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                         </p>
                       </div>
                       
+                      {/* Voice Recognition Command */}
+                      <div
+                        className="cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors"
+                        onClick={toggleVoiceRecognition}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="truncate">Voice Recognition</span>
+                          <div className="flex gap-1 flex-shrink-0">
+                            <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] leading-none">
+                              {COMMAND_KEY}
+                            </span>
+                            <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] leading-none">
+                              V
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] leading-relaxed text-white/70 truncate mt-1">
+                          {isVoiceActive
+                            ? "Stop listening for voice input."
+                            : "Start listening for voice input."}
+                        </p>
+                      </div>
+                      
+                      {/* Display transcript if available */}
+                      {isVoiceActive && transcript && (
+                        <div className="mt-2 px-2 py-1.5 bg-white/5 rounded">
+                          <div className="text-[10px] font-medium mb-1">Transcript:</div>
+                          <p className="text-[10px] leading-relaxed text-white/90 break-words">
+                            {transcript}
+                          </p>
+                        </div>
+                      )}
+
                       {/* Delete Last Screenshot Command */}
                       <div
                         className={`cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors ${
